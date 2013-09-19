@@ -1,0 +1,10 @@
+# sed.txt
+s/\/media\/336ce995-52bf-4f88-8f4a-37a4a8797bf4/highdy/g
+s/\/media\/08afa682-defa-47fe-99ca-147ccaf164d4/serina/g
+s/\/media\/926fb5ca-b54e-4dfc-828b-4c25ad072265/berta/g
+s/\/media\/f607a0b8-0539-495f-b375-1b722f63db69/alma/g
+s/336ce995-52bf-4f88-8f4a-37a4a8797bf4-highdy:MediaHighdy\/FilmeHD\//highdy\//g
+s/08afa682-defa-47fe-99ca-147ccaf164d4-serina:MediaOnSerina\//serina\//g
+s/926fb5ca-b54e-4dfc-828b-4c25ad072265-berta:MediaBerta\//MediaBerta\//g
+s/926fb5ca-b54e-4dfc-828b-4c25ad072265-berta:/berta\//g
+s/f607a0b8-0539-495f-b375-1b722f63db69-alma:MediaAlma\//alma\//g
