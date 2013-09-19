@@ -12,9 +12,3 @@ echo "$SNAPRAID_DUP_FILE"
 echo
 
 exit 0
-
-sed -i -f /etc/snapraid.sed.replace | awk '{ \
-#gsub("berta", "\033[1;33m&\033[0m"); \
-#gsub("alma", "\033[1;31m&\033[0m"); \
-#gsub("serina", "\033[1;35m&\033[0m"); \
-#gsub("highdy", "\033[1;36m&\033[0m"); print }'
