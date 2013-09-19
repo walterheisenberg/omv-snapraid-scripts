@@ -1,0 +1,138 @@
+#!/bin/bash
+#######################################################################
+# this is a helper script that keeps snapraid parity info in sync with
+# your data. Here's how it works:
+#   1) it first calls diff to figure out if the parity info is out of sync
+#   2) if there are changed files (i.e. new, changed, moved or removed),
+#         it then checks how many files were removed.
+#   3) if the deleted files exceed X (configurable), it triggers an
+#         alert email and stops. (in case of accidental deletions)
+#   4) otherwise, it will call sync.
+#   5) when sync finishes, it sends an email with the output to user.
+#
+# $Author: sidney - changed for OMV from: Solo0815
+# $Revision: 5
+# $Date: 2013-09-16
+#
+# $HeadURL: file:///svnrepo/linuxScripts/snapraid_diff_n_sync.sh $
+#
+# Version 0.1
+# ToDo:
+# - create HTML-Output
+# - switch to automatically do a sync after X days if nothing happens
+#
+#######################################################################
+
+# impor libs.sh
+. /usr/local/bin/libs.sh
+
+# Set path to snapraid.conf
+SNAPRAIDCONF="/etc/snapraid.conf"
+
+EMAIL_SUBJECT_PREFIX="[Hoppetz] SnapRAID - "
+DEL_THRESHOLD=0
+
+# read CONTENT and PARITY from $SNAPRAIDCONF
+CONTENT_FILE="$(egrep '^content /var/' $SNAPRAIDCONF | awk '{print $2}')"
+PARITY_FILE="$(egrep '^parity /' $SNAPRAIDCONF | awk '{print $2}')"
+
+## INTERNAL TEMP VARS ##
+TMP_OUTPUT="/tmp/snapraid.out"
+
+SNAPRAIDBIN="$(which snapraid)"
+if [ -z $SNAPRAIDBIN ]; then
+	_log "WARN: snapraid executable not found!"
+fi
+if [ ! -x $SNAPRAIDBIN ]; then
+	_log "WARN: snapraid not executable! Please do a 'chmod +x snapraid'"
+fi
+
+# output also on the cli
+VERBOSE=true 		# true or false
+DEBUG=false
+
+if $DEBUG; then
+	_log "DEBUG: CONTENT_FILE: $CONTENT_FILE"
+	_log "DEBUG: PARITY_FILE: $PARITY_FILE"
+fi
+
+if [ -f $TMP_OUTPUT ]; then
+	rm $TMP_OUTPUT && _log "INFO: '$TMP_OUTPUT' deleted - creating a new one"
+fi
+
+#sanity check first to make sure we can access the content and parity files
+if [ ! -e $CONTENT_FILE ]; then
+  _log "WARN: Content file ($CONTENT_FILE) not found!"
+  exit 1
+fi
+
+if [ ! -e $PARITY_FILE ]; then
+  _log "WARN: Parity file ($PARITY_FILE) not found!"
+  exit 1
+fi
+
+
+_log "INFO: ----------------------------------------"
+_log "INFO: SnapRAID Job started"
+echo "SnapRAID Job started - $(date)" >> $TMP_OUTPUT
+
+# run the snapraid DIFF command
+_log "INFO: SnapRAID DIFF started"
+echo "SnapRAID DIFF started - $(date)" >> $TMP_OUTPUT
+$SNAPRAIDBIN diff >> $TMP_OUTPUT
+
+# wait for the above cmd to finish
+wait
+
+_log "INFO: SnapRAID DIFF finished"
+_log "INFO: ----------------------------------------"
+echo "SnapRAID DIFF finished - $(date)" >> $TMP_OUTPUT
+echo "----------------------------------------" >> $TMP_OUTPUT
+
+DEL_COUNT=$(grep ^Remove $TMP_OUTPUT | wc -l - | cut -d' ' -f1)
+ADD_COUNT=$(grep ^Add $TMP_OUTPUT | wc -l - | cut -d' ' -f1)
+MOVE_COUNT=$(grep ^Move $TMP_OUTPUT | wc -l - | cut -d' ' -f1)
+UPDATE_COUNT=$(grep ^Update $TMP_OUTPUT | wc -l - | cut -d' ' -f1)
+
+_log "INFO: SUMMARY of changes since last sync - Added: [$ADD_COUNT] - Deleted: [$DEL_COUNT] - Moved: [$MOVE_COUNT] - Updated: [$UPDATE_COUNT]"
+
+# check if files have changed
+if [ $DEL_COUNT -gt 0 -o $ADD_COUNT -gt 0 -o $MOVE_COUNT -gt 0 -o $UPDATE_COUNT -gt 0 ]; then
+    # YES, check if number of deleted files exceed DEL_THRESHOLD
+    if [ $DEL_COUNT -gt $DEL_THRESHOLD ]; then
+        # YES, lets inform user and not proceed with the sync just in case
+        _log "INFO: Number of deleted files ($DEL_COUNT) exceeded threshold ($DEL_THRESHOLD). NOT proceeding with sync job. Please run sync manually if this is not an error condition."
+		echo "Number of deleted files ($DEL_COUNT) exceeded threshold ($DEL_THRESHOLD). NOT proceeding with sync job. Please run sync manually if this is not an error condition" >> $TMP_OUTPUT
+
+		_send_email "$EMAIL_SUBJECT_PREFIX WARNING - Number of deleted files ($DEL_COUNT) exceeded threshold ($DEL_THRESHOLD)" "$TMP_OUTPUT" "[Hoppetz] SnapRAID" "lindlein@gmx.com"
+    else
+        # NO, delete threshold not reached, lets run the sync job
+        _log "INFO: Changes detected [A-$ADD_COUNT,D-$DEL_COUNT,M-$MOVE_COUNT,U-$UPDATE_COUNT] and deleted files ($DEL_COUNT) is below threshold ($DEL_THRESHOLD). Running SYNC Command."
+		echo "Changes detected [A-$ADD_COUNT,D-$DEL_COUNT,M-$MOVE_COUNT,U-$UPDATE_COUNT] and deleted files ($DEL_COUNT) is below threshold ($DEL_THRESHOLD). Running SYNC Command" >> $TMP_OUTPUT
+
+        _log "INFO: SnapRAID SYNC Job started"
+        _log "INFO: ----------------------------------------"
+		echo "SnapRAID SYNC Job started - $(date)" >> $TMP_OUTPUT
+		echo "----------------------------------------" >> $TMP_OUTPUT
+
+        $SNAPRAIDBIN sync >> $TMP_OUTPUT
+        #wait for the job to finish
+        wait
+
+        _log "INFO: ----------------------------------------"
+        _log "INFO: SnapRAID SYNC Job finished"
+		echo "SnapRAID SYNC Job finished - $(date)" >> $TMP_OUTPUT
+		echo "----------------------------------------" >> $TMP_OUTPUT
+
+        _send_email "$EMAIL_SUBJECT_PREFIX Sync Job COMPLETED" "$TMP_OUTPUT" "[Hoppetz] SnapRAID" "lindlein@gmx.com"
+    fi
+else
+    # NO, so lets log it and exit
+    _log "INFO: No change detected. Nothing to do"
+fi
+
+_log "INFO: SnapRAID Job ended."
+# remove $TMP_OUTPUT
+rm $TMP_OUTPUT
+
+exit 0
