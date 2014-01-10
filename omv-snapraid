@@ -1,23 +1,44 @@
 #!/bin/bash
 SNAPRAID_DUP_FILE="/media/926fb5ca-b54e-4dfc-828b-4c25ad072265/Ordner_fuer_Dienste/snapraid-dup-txt/snapraid-dup.txt"
 
-case "$1" in
-	dup)
-		f_create_dup
-		;;
-	show)
-		f_show_dup
-		;;
-	*)
-		f_usage
-		;;
+f_check_date() {
+	# Get file-change date
+	DATE_DUP_FILE="$(stat --format=%Y $SNAPRAID_DUP_FILE)"
+	DATE_CONTENT_FILE="$(stat --format=%Y /var/snapraid/content)"
+	# check, if duplicate file is older than content
+	# That means, that a sync was running after creating
+	# a duplicate file, so it's to old
+	# older:   return 99
+	# younger: return 0 (nothing to do)
+	if [ $DATE_DUP_FILE -lt $DATE_CONTENT_FILE ]; then
+		return 99
+	else
+		return 0
+	fi
+}
 
 f_usage() {
-	echo "Usage:"
-	}
-
+	echo "Usage: $(basename $0) (dup|show)"
+	echo
+	echo "dup    creates a duplicate file in:"
+	echo "       $SNAPRAID_DUP_FILE"
+	echo
+	echo "show   shows the duplicate files on the harddisk"
+	echo "       with some colored output"
+	exit
+}
 
 f_create_dup() {
+	f_check_date
+	if [ $? -eq 0 ];then
+		echo "The duplicate file is younger than the content file!"
+		echo "There is no need to create it new"
+		echo "To view it, use 'omv-snapraid show'"
+		exit 0
+	fi
+	echo "Your duplicate file is older than the content file!"
+	echo "Creating a new one ..."
+	echo
 	snapraid -G -l $SNAPRAID_DUP_FILE dup
 
 	sed -i "1iSnapRAID Dup started at $(date)" $SNAPRAID_DUP_FILE
@@ -32,16 +53,10 @@ f_create_dup() {
 }
 
 f_show_dup() {
-	# Get file-change date
-	DATE_DUP_FILE="$(stat --format=%Y $SNAPRAID_DUP_FILE)"
-	DATE_CONTENT_FILE="$(stat --format=%Y /var/snapraid/content)"
-
-	# check, if duplicate file is older than content
-	# That means, that a sync was running after creating
-	# a duplicate file, so it's to old
-	if [ $DATE_DUP_FILE -lt $DATE_CONTENT_FILE ]; then
-		echo "Your duplicate file is older than the content file!"
-		echo "Please run 'omv-snapraid-create-dup' to create a new one"
+	f_check_date
+	if [ $? -eq 99 ];then
+		echo "The duplicate file is older than the content file!"
+		echo "Please run 'omv-snapraid dup' to create a new one"
 		echo
 		exit 1
 	fi
@@ -58,6 +73,22 @@ f_show_dup() {
 	gsub("serina", "\033[1;35m&\033[0m"); \
 	gsub("highdy", "\033[1;36m&\033[0m"); print }'
 }
+
+case "$1" in
+	dup)
+		f_create_dup
+		;;
+	show)
+		f_show_dup
+		;;
+	*)
+		f_usage
+		;;
+esac
+
+echo "This is not going to happen!"
+exit 42
+
 
 
 

@@ -10,26 +10,145 @@
 #   4) otherwise, it will call sync.
 #   5) when sync finishes, it sends an email with the output to user.
 #
-# $Author: sidney - changed for OMV from: Solo0815
+# $Author: sidney
 # $Revision: 5
 # $Date: 2013-09-16
-#
 # $HeadURL: file:///svnrepo/linuxScripts/snapraid_diff_n_sync.sh $
 #
-# Version 0.1
+# changed for OMV from: Solo0815
+#
 # ToDo:
 # - create HTML-Output
 # - switch to automatically do a sync after X days if nothing happens
 #
 #######################################################################
 
-# impor libs.sh
-. /usr/local/bin/libs.sh
+#######################################################################
+# Mail settings:
+# get basic info
+. /etc/default/openmediavault
+
+# needed for omv_config_get command
+. /usr/share/openmediavault/scripts/helper-functions
+
+# get OMV-Mail
+# OMV_MAIL_server=$(omv_config_get "//system/email/server")
+# echo "OMV_MAIL_server $OMV_MAIL_server"
+# OMV_MAIL_port=$(omv_config_get "//system/email/port")
+# echo "OMV_MAIL_port $OMV_MAIL_port"
+# OMV_MAIL_tls=$(omv_config_get "//system/email/tls")
+# echo "OMV_MAIL_tls $OMV_MAIL_tls"
+# OMV_MAIL_sender=$(omv_config_get "//system/email/sender")
+# echo "OMV_MAIL_sender $OMV_MAIL_sender"
+# 
+# #authentication required
+# OMV_MAIL_authrequired=$(omv_config_get "//system/email/authentication/enable")
+# echo "OMV_MAIL_authrequired $OMV_MAIL_authrequired"
+# OMV_MAIL_username=$(omv_config_get "//system/email/authentication/username")
+# echo "OMV_MAIL_username $OMV_MAIL_username"
+# OMV_MAIL_password=$(omv_config_get "//system/email/authentication/password")
+# echo "OMV_MAIL_password: $OMV_MAIL_password"
+
+#primary and secondary recipients
+OMV_MAIL_primarymail=$(omv_config_get "//system/email/primaryemail")
+#echo "OMV_MAIL_primarymail $OMV_MAIL_primarymail"
+OMV_MAIL_secondarymail=$(omv_config_get "//system/email/secondaryemail")
+#echo "OMV_MAIL_secondarymail $OMV_MAIL_secondarymail"
+
+
+# structure in /etc/openmediavault/config.xml
+
+#    <email>
+#      <enable>1</enable>
+#      <server>mail.ryecoinc.com</server>
+#      <port>25</port>
+#      <tls>0</tls>
+#      <sender>server@ryecoinc.com</sender>
+#      <authentication>
+#        <enable>0</enable>
+#        <username></username>
+#        <password></password>
+#      </authentication>
+#      <primaryemail>aaron@ryecoinc.net</primaryemail>
+#      <secondaryemail></secondaryemail>
+#    </email>
+
+#EMAIL_SUBJECT_PREFIX="[${OMV_MAIL_sender}] SnapRAID"
+
+#######################################################################
+
+################################################################
+#
+#   name:	_send_email
+#   parameter : 	# $1 = Betreff
+					# $2 = Datei mit Mailtext
+					# Optional:
+					# $3 = Von wem wurde die Nachricht gesendet (Voller Name), z.B. "Server Status-Report"
+					# $4 = Antwort an Mail-Adresse
+#   return: 	0 = Alles OK
+#				1 = Fehler passiert
+#
+_send_email(){
+
+## the below does not work with the internal OMV-Settings
+#	mail -s "$1" -a 'Content-Type: text/plain; charset=utf-8' $MAIL -- -F "$3" -f "$4" < $2
+
+#_log "INFO: Mail should be sent here - to be fixed"
+#echo "Mail should be sent here - to be fixed"
+
+#mail [-a header] [-b bcc-addr] [-c cc-addr] [-s subject] to-addr
+mail -c "$OMV_MAIL_secondarymail" -s "$1" "$OMV_MAIL_primarymail" < $2
+
+	if [ $? -eq 0 ]; then
+		_log "INFO: Status Report an $MAIL gesendet"
+		return 0
+	else
+		_log "WARN: Mail konnte nicht gesendet werden. Es ist ein Fehler aufgetreten. Siehe /var/log/mail.log"
+		return 1
+	fi
+}
+
+################################################################
+#
+#   name      : _log
+#   parameter   : $LOGMESSAGE : logmessage in format "PRIORITY: MESSAGE"
+#   return      : none
+#
+_log()
+   {(
+
+       [[ "$*" =~ ^([A-Za-z]*):(.*) ]] &&
+         {
+            PRIORITY=${BASH_REMATCH[1]}
+            LOGMESSAGE=${BASH_REMATCH[2]}
+            [[ "$(basename "$0")" =~ ^(.*)\. ]] && LOGMESSAGE="${BASH_REMATCH[1]}[$$]: $PRIORITY: '$LOGMESSAGE'";
+         }
+
+      if $VERBOSE ; then
+         # next line only with implementation where logger does not support option '-s'
+         # echo "$(date '+%b %e %H:%M:%S'):$LOGMESSAGE"
+
+         [ $SYSLOG ] && $LOGGER -s -t "$(date '+%b %e %H:%M:%S'): $USER" -p $FACILITY.$PRIORITY "$LOGMESSAGE"
+
+      else
+         [ $SYSLOG ] && $LOGGER -p $FACILITY.$PRIORITY "$LOGMESSAGE"
+
+      fi   # > if [ "$VERBOSE" = "NO" ]; then
+
+   )}
+
+
+################################################################
+#####     MAIN BODY of the script
+################################################################
+
+SCRIPTVERSION="0.5"
 
 # Set path to snapraid.conf
 SNAPRAIDCONF="/etc/snapraid.conf"
 
-EMAIL_SUBJECT_PREFIX="[Hoppetz] SnapRAID - "
+# Define threshold of files deleted to start the sync-process
+# default = 0 to make sure no sync process is started while testing
 DEL_THRESHOLD=0
 
 # read CONTENT and PARITY from $SNAPRAIDCONF
@@ -47,9 +166,16 @@ if [ ! -x $SNAPRAIDBIN ]; then
 	_log "WARN: snapraid not executable! Please do a 'chmod +x snapraid'"
 fi
 
-# output also on the cli
-VERBOSE=true 		# true or false
-DEBUG=false
+SNAPRAIDVERSION="$(${SNAPRAIDBIN} -V)"
+
+## Functions
+# Logging Settings
+SYSLOG="true"            # activate write to syslog (default="true")
+VERBOSE="false"            # use the verbose mode, with additional info on the command line (default="true")
+LOGGER="/usr/bin/logger"   # path and name of logger (default="/usr/bin/logger")
+FACILITY="local5"         # facility to log to -> see syslog.conf  and add the line (default="local6")
+						# "local6.* %/var/log/autoshutdown.log"
+DEBUG="false"
 
 if $DEBUG; then
 	_log "DEBUG: CONTENT_FILE: $CONTENT_FILE"
@@ -71,10 +197,11 @@ if [ ! -e $PARITY_FILE ]; then
   exit 1
 fi
 
+## Start of the script - Start
 
 _log "INFO: ----------------------------------------"
-_log "INFO: SnapRAID Job started"
-echo "SnapRAID Job started - $(date)" >> $TMP_OUTPUT
+_log "INFO: SnapRAID Job started - Script version: $SCRIPTVERSION"
+echo "SnapRAID Job started - $(date) - Script version: $VERSION" >> $TMP_OUTPUT
 
 # run the snapraid DIFF command
 _log "INFO: SnapRAID DIFF started"
@@ -89,10 +216,10 @@ _log "INFO: ----------------------------------------"
 echo "SnapRAID DIFF finished - $(date)" >> $TMP_OUTPUT
 echo "----------------------------------------" >> $TMP_OUTPUT
 
-DEL_COUNT=$(grep ^Remove $TMP_OUTPUT | wc -l - | cut -d' ' -f1)
-ADD_COUNT=$(grep ^Add $TMP_OUTPUT | wc -l - | cut -d' ' -f1)
-MOVE_COUNT=$(grep ^Move $TMP_OUTPUT | wc -l - | cut -d' ' -f1)
-UPDATE_COUNT=$(grep ^Update $TMP_OUTPUT | wc -l - | cut -d' ' -f1)
+DEL_COUNT=$(egrep '^[Rr]emove' $TMP_OUTPUT | wc -l - | cut -d' ' -f1)
+ADD_COUNT=$(egrep '^[Aa]dd' $TMP_OUTPUT | wc -l - | cut -d' ' -f1)
+MOVE_COUNT=$(egrep '^[Mm]ove' $TMP_OUTPUT | wc -l - | cut -d' ' -f1)
+UPDATE_COUNT=$(egrep '^[Uu]pdate' $TMP_OUTPUT | wc -l - | cut -d' ' -f1)
 
 _log "INFO: SUMMARY of changes since last sync - Added: [$ADD_COUNT] - Deleted: [$DEL_COUNT] - Moved: [$MOVE_COUNT] - Updated: [$UPDATE_COUNT]"
 
@@ -104,7 +231,7 @@ if [ $DEL_COUNT -gt 0 -o $ADD_COUNT -gt 0 -o $MOVE_COUNT -gt 0 -o $UPDATE_COUNT 
         _log "INFO: Number of deleted files ($DEL_COUNT) exceeded threshold ($DEL_THRESHOLD). NOT proceeding with sync job. Please run sync manually if this is not an error condition."
 		echo "Number of deleted files ($DEL_COUNT) exceeded threshold ($DEL_THRESHOLD). NOT proceeding with sync job. Please run sync manually if this is not an error condition" >> $TMP_OUTPUT
 
-		_send_email "$EMAIL_SUBJECT_PREFIX WARNING - Number of deleted files ($DEL_COUNT) exceeded threshold ($DEL_THRESHOLD)" "$TMP_OUTPUT" "[Hoppetz] SnapRAID" "lindlein@gmx.com"
+		_send_email "SnapRAID - WARNING - Number of deleted files (${DEL_COUNT}) exceeded threshold (${DEL_THRESHOLD})" "${TMP_OUTPUT}" "${EMAIL_SUBJECT_PREFIX}" "${OMV_MAIL_sender}"
     else
         # NO, delete threshold not reached, lets run the sync job
         _log "INFO: Changes detected [A-$ADD_COUNT,D-$DEL_COUNT,M-$MOVE_COUNT,U-$UPDATE_COUNT] and deleted files ($DEL_COUNT) is below threshold ($DEL_THRESHOLD). Running SYNC Command."
@@ -124,7 +251,7 @@ if [ $DEL_COUNT -gt 0 -o $ADD_COUNT -gt 0 -o $MOVE_COUNT -gt 0 -o $UPDATE_COUNT 
 		echo "SnapRAID SYNC Job finished - $(date)" >> $TMP_OUTPUT
 		echo "----------------------------------------" >> $TMP_OUTPUT
 
-        _send_email "$EMAIL_SUBJECT_PREFIX Sync Job COMPLETED" "$TMP_OUTPUT" "[Hoppetz] SnapRAID" "lindlein@gmx.com"
+        _send_email "$EMAIL_SUBJECT_PREFIX - Sync Job COMPLETED" "${TMP_OUTPUT}" "${EMAIL_SUBJECT_PREFIX}" "${OMV_MAIL_sender}"
     fi
 else
     # NO, so lets log it and exit
